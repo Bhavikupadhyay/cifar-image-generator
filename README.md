@@ -1,12 +1,26 @@
 # CIFAR Image Generator (DDPM)
 
-A modern implementation of a Denoising Diffusion Probabilistic Model (DDPM) for generating CIFAR-10 like images, built with PyTorch.
+A modern, modular PyTorch implementation of a Denoising Diffusion Probabilistic Model (DDPM) designed for generating high-quality images (specifically CIFAR-10). This repository serves as a clean, educational, and extensible codebase for understanding and experimenting with diffusion models.
 
-## Features
-- **Modular Architecture**: Clean separation of model components (`UNet`, `DDPM`), configuration, and data loading.
-- **Configurable**: Uses a robust `Config` system for easy hyperparameter tuning.
-- **Inference Ready**: Includes a dedicated inference script for generating samples from trained models.
-- **Reproducible**: Seeded runs and organized experiment tracking.
+## Key Features
+
+-   **Modular Design**: The codebase is split into logical components (`UNet`, `DDPM`, `Dataset`, `Config`), making it easy to read and modify.
+-   **Robust Configuration**: Powered by `dataclasses`, the `Config` system allows for type-safe and centralized hyperparameter management.
+-   **Reproducibility**: Integrated seed setting and automatic experiment tracking (saving configs, checkpoints, and samples).
+-   **Weights & Biases (WandB)**: Optional built-in integration for experiment logging and visualization.
+
+## Architecture
+
+This project implements the standard DDPM formulation:
+-   **Backbone**: A customized U-Net (`src/modules/unet.py`) with:
+    -   Time embeddings (Sinusoidal).
+    -   Residual blocks (`DoubleConv`).
+    -   Downsampling/Upsampling paths with skip connections.
+    -   Self-attention mechanisms (optional/configurable).
+-   **Diffusion Process**: Managed by the `DDPM` class (`src/modules/ddpm.py`), handling:
+    -   Forward diffusion (adding noise).
+    -   Reverse diffusion (denoising step-by-step).
+    -   Noise schedule (linear beta schedule).
 
 ## Installation
 
@@ -26,39 +40,56 @@ A modern implementation of a Denoising Diffusion Probabilistic Model (DDPM) for 
 ## Usage
 
 ### Training
-To train the model from scratch:
+
+To start a training run:
 ```bash
 python train.py
 ```
-This will:
--   Download the CIFAR-10 dataset (if not present).
--   Create a new experiment folder in `runs/<timestamp>`.
--   Save checkpoints and sample images periodically.
+**Configuration**:
+You can modify hyperparameters in `src/config.py`. Key parameters include:
+-   `num_epochs`: Total training epochs.
+-   `batch_size`: Batch size for the dataloader.
+-   `learning_rate`: learning rate for Adam optimizer.
+-   `num_timesteps`: Number of diffusion steps (T).
+-   `use_wandb`: Set to `True` for WandB logging.
 
-### Inference
- To generate images using a trained model:
+All runs are saved to the `runs/` directory with a timestamp (e.g., `runs/2026-02-15_14-55-53`).
+
+### Inference / Sampling
+
+To generate images using a trained model:
 ```bash
-# Load the latest checkpoint from a specific run
-python inference.py --run_name <RUN_TIMESTAMP> --num_samples 16
+# Basic usage (defaults to latest checkpoint in the run folder)
+python inference.py --run_name <RUN_TIMESTAMP_OR_NAME>
 
-# Example
-python inference.py --run_name 2026-02-15_14-55-53 --device cpu
+# Advanced usage
+python inference.py \
+    --run_name 2026-02-15_14-55-53 \
+    --epoch latest \
+    --num_samples 64 \
+    --device cuda \
+    --outfile my_samples.png
 ```
 
 ## Project Structure
+
 ```
 .
-├── src/                # Source code
-│   ├── modules/        # Neural network modules (UNet, DDPM)
-│   ├── config.py       # Configuration management
-│   ├── dataset.py      # Data loading
-│   └── utils.py        # Utilities
-├── train.py            # Main training script
-├── inference.py        # Inference script
-└── requirements.txt    # Dependencies
+├── src/
+│   ├── modules/
+│   │   ├── unet.py         # U-Net architecture
+│   │   ├── ddpm.py         # Diffusion logic (noise schedule, sampling)
+│   │   └── blocks.py       # Neural network building blocks
+│   ├── config.py           # Configuration dataclass
+│   ├── dataset.py          # CIFAR-10 data loading
+│   └── utils.py            # Helpers (save/load, seeding)
+├── train.py                # Entry point for training
+├── inference.py            # Entry point for generation
+└── requirements.txt        # Python dependencies
 ```
 
-## Branches
--   `main`: Stable development branch.
--   `feature/verify-pipeline`: Contains additional scripts for full pipeline verification.
--   `cleanup/prepare-public`: Cleaned up version ready for public release (no temp scripts).
+## Extending the Project
+
+-   **New Datasets**: Modify `src/dataset.py` to return a standard PyTorch DataLoader for your custom dataset.
+-   **Architecture Tweaks**: Edit `src/modules/unet.py` to change the number of layers, channels, or add new attention mechanisms.
+-   **Noise Schedules**: Modify the `beta_start` and `beta_end` in `src/config.py` or implement new schedules (cosine, sigmoid) in `src/modules/ddpm.py`.

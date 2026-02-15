@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project
+runs/
+data/
+wandb/
+.ipynb_checkpoints/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

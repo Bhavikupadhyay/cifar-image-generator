@@ -11,20 +11,20 @@ class Config:
   experiments_dir: str = 'runs'
 
   # --- Training Hyperparameters ---
-  batch_size: int = 512
-  num_workers: int = 4
-  num_epochs: int = 1
+  batch_size: int = 256
+  num_workers: int = 2
+  num_epochs: int = 100
   learning_rate: float = 2e-4
   seed: int = 42
 
   # --- Checkpointing and Logging ---
-  save_every_epochs: int = 5
-  sample_every_epochs: int = 5
+  save_every_epochs: int = 10
+  sample_every_epochs: int = 10
   use_wandb: bool = False
   wandb_entity: str = None
 
   # --- Diffusion Parameters ---
-  num_timesteps: int = 100
+  num_timesteps: int = 1000
   beta_start: float = 1e-4
   beta_end: float = 0.02
   image_size: int = 32

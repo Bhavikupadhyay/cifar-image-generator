@@ -92,8 +92,8 @@ def main():
         print(f"Loading checkpoint: {ckpt_path}")
 
     if not os.path.exists(ckpt_path):
-         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
-         
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
     checkpoint = torch.load(ckpt_path, map_location=args.device)
     ddpm.load_state_dict(checkpoint)
     ddpm.eval()

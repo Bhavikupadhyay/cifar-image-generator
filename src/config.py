@@ -18,8 +18,8 @@ class Config:
   seed: int = 42
 
   # --- Checkpointing and Logging ---
-  save_every_epochs: int = 10
-  sample_every_epochs: int = 10
+  save_every_epochs: int = 5
+  sample_every_epochs: int = 5
   use_wandb: bool = False
   wandb_entity: str = None
 

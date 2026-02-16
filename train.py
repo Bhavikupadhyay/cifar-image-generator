@@ -16,7 +16,7 @@ except ImportError:
   HAS_WANDB = False
 
 
-def train_ddpm(ddpm, train_loader, cfg: Config, device):
+def train_ddpm(ddpm, train_loader, cfg: Config, device, writer=None):
     optimizer = Adam(ddpm.parameters(), lr=cfg.learning_rate)
     loss_history = []
 
@@ -46,6 +46,12 @@ def train_ddpm(ddpm, train_loader, cfg: Config, device):
         epoch_avg_loss = sum(batch_losses) / len(batch_losses)
         loss_history.append(epoch_avg_loss)
 
+        # Log loss metrics
+        if writer:
+            writer.add_scalar('Loss/train', epoch_avg_loss, epoch + 1)
+        if cfg.use_wandb and HAS_WANDB:
+            wandb.log({"train_loss": epoch_avg_loss, "epoch": epoch + 1})
+
         # Sampling and Logging
         if (epoch + 1) % cfg.sample_every_epochs == 0 or (epoch + 1) == cfg.num_epochs:
             ddpm.eval()
@@ -54,6 +60,12 @@ def train_ddpm(ddpm, train_loader, cfg: Config, device):
             
             save_path = os.path.join(cfg.samples_dir, f'sample_{epoch+1}.png')
             save_images(samples, save_path)
+
+            # Log sample images
+            if writer:
+                writer.add_images('Samples', samples, epoch + 1)
+            if cfg.use_wandb and HAS_WANDB:
+                wandb.log({"samples": wandb.Image(save_path), "epoch": epoch + 1})
             
             # Revert to train mode
             ddpm.train()
@@ -102,7 +114,12 @@ def train(cfg: Config, resume_id=None):
     ).to(device)
 
     # Start Training
-    train_ddpm(ddpm, train_loader, cfg, device)
+    train_ddpm(ddpm, train_loader, cfg, device, writer=writer)
+
+    # Cleanup
+    writer.close()
+    if cfg.use_wandb and HAS_WANDB:
+        wandb.finish()
 
 
 if __name__ == '__main__':

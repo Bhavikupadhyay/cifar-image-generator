@@ -22,3 +22,4 @@ wandb/
 # IDE
 .vscode/
 .idea/
+model/

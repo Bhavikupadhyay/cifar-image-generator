@@ -136,6 +136,11 @@ def _to_png_grid(images: np.ndarray, nrow: int = 4) -> bytes:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@app.get("/")
+def root():
+    return {"message": "CIFAR DDPM Generator", "endpoints": {"health": "/health", "generate": "POST /generate?num_images=1"}}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": "session" in _state}

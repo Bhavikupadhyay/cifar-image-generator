@@ -1,17 +1,18 @@
 """
 FastAPI + Gradio serving app for the CIFAR DDPM generator.
 
-Loads the INT8 ONNX model at startup. The DDPM reverse diffusion loop
-runs in pure numpy — no PyTorch needed at serve time.
+Loads the INT8 ONNX model at startup. Uses DDIM sampling (50 steps, eta=0)
+for fast deterministic generation — no PyTorch needed at serve time.
 
 Environment variables:
-    MODEL_PATH    path to unet_int8.onnx  (default: model/unet_int8.onnx)
-    MODEL_CONFIG  path to config.yaml     (default: model/config.yaml)
+    MODEL_PATH      path to unet_int8.onnx  (default: model/unet_int8.onnx)
+    MODEL_CONFIG    path to config.yaml     (default: model/config.yaml)
+    DDIM_STEPS      number of DDIM steps    (default: 50)
 
 Endpoints:
     GET  /health
     POST /generate?num_images=1
-    GET  /ui           (Gradio interface)
+    GET  /           (Gradio interface)
 """
 
 import io
@@ -26,22 +27,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 
-# ── Diffusion schedule (rebuilt from config, no PyTorch needed) ───────────────
+# ── Diffusion schedule ────────────────────────────────────────────────────────
 
 class _Schedule:
     def __init__(self, n_timesteps, beta_start, beta_end):
         betas = np.linspace(beta_start, beta_end, n_timesteps, dtype=np.float32)
         alphas = 1.0 - betas
-        alphas_cumprod = np.cumprod(alphas)
-        alphas_cumprod_prev = np.concatenate([[1.0], alphas_cumprod[:-1]])
-
         self.n_timesteps = n_timesteps
-        self.betas = betas
-        self.sqrt_recip_alphas = np.sqrt(1.0 / alphas).astype(np.float32)
-        self.sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - alphas_cumprod).astype(np.float32)
-        self.posterior_variance = (
-            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-        ).astype(np.float32)
+        self.alphas_cumprod = np.cumprod(alphas).astype(np.float32)
 
 
 # ── App state ─────────────────────────────────────────────────────────────────
@@ -71,7 +64,8 @@ async def lifespan(app: FastAPI):
         beta_end=cfg.get("beta_end", 0.02),
     )
     _state["cfg"] = cfg
-    print(f"Loaded: {model_path}")
+    _state["ddim_steps"] = int(os.getenv("DDIM_STEPS", 50))
+    print(f"Loaded: {model_path}  |  DDIM steps: {_state['ddim_steps']}")
     yield
     _state.clear()
 
@@ -79,31 +73,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CIFAR DDPM Generator", lifespan=lifespan)
 
 
-# ── Sampling logic ────────────────────────────────────────────────────────────
-
-def _denoise_step(x: np.ndarray, t_idx: int) -> np.ndarray:
-    """Single reverse diffusion step via ONNX inference."""
-    session: ort.InferenceSession = _state["session"]
-    sched: _Schedule = _state["schedule"]
-
-    t = np.full((x.shape[0],), t_idx, dtype=np.int64)
-    predicted_noise = session.run(["noise"], {"x": x, "t": t})[0]
-
-    mean = sched.sqrt_recip_alphas[t_idx] * (
-        x - sched.betas[t_idx] * predicted_noise / sched.sqrt_one_minus_alphas_cumprod[t_idx]
-    )
-
-    if t_idx == 0:
-        return mean
-
-    z = np.random.randn(*x.shape).astype(np.float32)
-    return mean + np.sqrt(sched.posterior_variance[t_idx]) * z
-
+# ── DDIM sampling ─────────────────────────────────────────────────────────────
 
 def _sample(num_images: int) -> np.ndarray:
-    """Full reverse diffusion: pure Gaussian noise → denoised images."""
+    """DDIM reverse diffusion (eta=0, deterministic) in num_steps steps."""
     sched: _Schedule = _state["schedule"]
     cfg = _state["cfg"]
+    session: ort.InferenceSession = _state["session"]
+    num_steps: int = _state["ddim_steps"]
+
+    # Evenly spaced timestep indices from T-1 down to 0
+    T = sched.n_timesteps
+    step_indices = np.linspace(0, T - 1, num_steps + 1, dtype=int)[::-1]
 
     x = np.random.randn(
         num_images,
@@ -112,14 +93,32 @@ def _sample(num_images: int) -> np.ndarray:
         cfg.get("image_size", 32),
     ).astype(np.float32)
 
-    for t_idx in reversed(range(sched.n_timesteps)):
-        x = _denoise_step(x, t_idx)
+    for i in range(num_steps):
+        t_idx = int(step_indices[i])
+        t_prev_idx = int(step_indices[i + 1])
+
+        t = np.full((num_images,), t_idx, dtype=np.int64)
+        eps = session.run(["noise"], {"x": x, "t": t})[0]
+
+        alpha_t = sched.alphas_cumprod[t_idx]
+        alpha_t_prev = sched.alphas_cumprod[t_prev_idx] if t_prev_idx > 0 else 1.0
+
+        # Predicted x0
+        x0_pred = (x - np.sqrt(1.0 - alpha_t) * eps) / np.sqrt(alpha_t)
+        x0_pred = np.clip(x0_pred, -1.0, 1.0)
+
+        # DDIM update (eta=0 → no stochastic term)
+        x = np.sqrt(alpha_t_prev) * x0_pred + np.sqrt(1.0 - alpha_t_prev) * eps
 
     return np.clip(x, -1.0, 1.0)
 
 
+# ── Image utilities ───────────────────────────────────────────────────────────
+
+UPSCALE = 8  # 32px → 256px per image
+
 def _to_pil_grid(images: np.ndarray, nrow: int = 4) -> Image.Image:
-    """Convert (N, C, H, W) float32 array in [-1, 1] to a PIL image grid."""
+    """Convert (N, C, H, W) float32 in [-1,1] to an upscaled PIL grid."""
     imgs = ((images + 1.0) / 2.0 * 255.0).clip(0, 255).astype(np.uint8)
     n, c, h, w = imgs.shape
     ncols = min(n, nrow)
@@ -130,12 +129,13 @@ def _to_pil_grid(images: np.ndarray, nrow: int = 4) -> Image.Image:
         r, col = divmod(i, ncols)
         grid[r * h:(r + 1) * h, col * w:(col + 1) * w] = img.transpose(1, 2, 0)
 
-    return Image.fromarray(grid)
+    pil = Image.fromarray(grid)
+    return pil.resize((pil.width * UPSCALE, pil.height * UPSCALE), Image.NEAREST)
 
 
-def _to_png_grid(images: np.ndarray, nrow: int = 4) -> bytes:
+def _to_png_bytes(images: np.ndarray) -> io.BytesIO:
     buf = io.BytesIO()
-    _to_pil_grid(images, nrow).save(buf, format="PNG")
+    _to_pil_grid(images).save(buf, format="PNG")
     buf.seek(0)
     return buf
 
@@ -151,25 +151,24 @@ def health():
 def generate(num_images: int = 1):
     if not 1 <= num_images <= 4:
         raise HTTPException(status_code=400, detail="num_images must be between 1 and 4")
-
-    samples = _sample(num_images)
-    return StreamingResponse(_to_png_grid(samples), media_type="image/png")
+    return StreamingResponse(_to_png_bytes(_sample(num_images)), media_type="image/png")
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 
 def _gradio_generate(num_images: int) -> Image.Image:
-    num_images = int(num_images)
-    samples = _sample(num_images)
-    return _to_pil_grid(samples)
+    return _to_pil_grid(_sample(int(num_images)))
 
 
-with gr.Blocks(title="CIFAR DDPM Generator") as demo:
-    gr.Markdown("## CIFAR-10 Diffusion Model\nGenerates 32×32 images via 1000-step DDPM reverse diffusion.")
-    with gr.Row():
-        num_slider = gr.Slider(minimum=1, maximum=4, step=1, value=4, label="Number of images")
-    btn = gr.Button("Generate", variant="primary")
-    output = gr.Image(label="Generated images", type="pil")
+with gr.Blocks(title="CIFAR-10 Diffusion Model", theme=gr.themes.Soft()) as demo:
+    gr.Markdown(
+        "# CIFAR-10 Diffusion Model\n"
+        "Generates images via DDIM sampling (50 steps). "
+        "Each run produces fresh random samples."
+    )
+    num_slider = gr.Slider(minimum=1, maximum=4, step=1, value=4, label="Number of images")
+    btn = gr.Button("Generate", variant="primary", size="lg")
+    output = gr.Image(label="Generated images", type="pil", show_download_button=True)
     btn.click(fn=_gradio_generate, inputs=[num_slider], outputs=[output])
 
 

@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as f
 
+GN_GROUPS = 32  # channels must be divisible by this; holds for all widths with base_channels=128
+
+
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels, mid_channels=None):
         super().__init__()
@@ -9,34 +12,23 @@ class DoubleConv(nn.Module):
         if not mid_channels:
             mid_channels = out_channels
 
-        self.conv1 = nn.Conv2d(
-            in_channels,
-            mid_channels,
-            kernel_size=3,
-            padding=1,
-            bias=False
-        )
-        self.bn1 = nn.BatchNorm2d(mid_channels)
+        self.conv1 = nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False)
+        self.gn1 = nn.GroupNorm(GN_GROUPS, mid_channels)
 
-        self.conv2 = nn.Conv2d(
-            mid_channels,
-            out_channels,
-            kernel_size=3,
-            padding=1,
-            bias=False
-        )
-        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.gn2 = nn.GroupNorm(GN_GROUPS, out_channels)
+
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, t_emb=None):
-      h = self.relu(self.bn1(self.conv1(x)))
+        h = self.relu(self.gn1(self.conv1(x)))
 
-      if t_emb is not None:
-        h = h + t_emb[:, :, None, None]
+        if t_emb is not None:
+            h = h + t_emb[:, :, None, None]
 
-      h = self.relu(self.bn2(self.conv2(h)))
+        h = self.relu(self.gn2(self.conv2(h)))
 
-      return h
+        return h
 
 
 class Downsample(nn.Module):

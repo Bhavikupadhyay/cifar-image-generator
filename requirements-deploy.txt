@@ -4,3 +4,4 @@ onnxruntime
 numpy<2
 Pillow
 python-multipart
+gradio

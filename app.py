@@ -1,5 +1,5 @@
 """
-FastAPI serving app for the CIFAR DDPM generator.
+FastAPI + Gradio serving app for the CIFAR DDPM generator.
 
 Loads the INT8 ONNX model at startup. The DDPM reverse diffusion loop
 runs in pure numpy — no PyTorch needed at serve time.
@@ -11,6 +11,7 @@ Environment variables:
 Endpoints:
     GET  /health
     POST /generate?num_images=1
+    GET  /ui           (Gradio interface)
 """
 
 import io
@@ -18,6 +19,7 @@ import os
 import yaml
 import numpy as np
 import onnxruntime as ort
+import gradio as gr
 from contextlib import asynccontextmanager
 from PIL import Image
 from fastapi import FastAPI, HTTPException
@@ -116,8 +118,8 @@ def _sample(num_images: int) -> np.ndarray:
     return np.clip(x, -1.0, 1.0)
 
 
-def _to_png_grid(images: np.ndarray, nrow: int = 4) -> bytes:
-    """Convert (N, C, H, W) float32 array in [-1, 1] to a PNG grid."""
+def _to_pil_grid(images: np.ndarray, nrow: int = 4) -> Image.Image:
+    """Convert (N, C, H, W) float32 array in [-1, 1] to a PIL image grid."""
     imgs = ((images + 1.0) / 2.0 * 255.0).clip(0, 255).astype(np.uint8)
     n, c, h, w = imgs.shape
     ncols = min(n, nrow)
@@ -128,18 +130,17 @@ def _to_png_grid(images: np.ndarray, nrow: int = 4) -> bytes:
         r, col = divmod(i, ncols)
         grid[r * h:(r + 1) * h, col * w:(col + 1) * w] = img.transpose(1, 2, 0)
 
+    return Image.fromarray(grid)
+
+
+def _to_png_grid(images: np.ndarray, nrow: int = 4) -> bytes:
     buf = io.BytesIO()
-    Image.fromarray(grid).save(buf, format="PNG")
+    _to_pil_grid(images, nrow).save(buf, format="PNG")
     buf.seek(0)
     return buf
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
-@app.get("/")
-def root():
-    return {"message": "CIFAR DDPM Generator", "endpoints": {"health": "/health", "generate": "POST /generate?num_images=1"}}
-
+# ── FastAPI endpoints ─────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -153,3 +154,23 @@ def generate(num_images: int = 1):
 
     samples = _sample(num_images)
     return StreamingResponse(_to_png_grid(samples), media_type="image/png")
+
+
+# ── Gradio UI ─────────────────────────────────────────────────────────────────
+
+def _gradio_generate(num_images: int) -> Image.Image:
+    num_images = int(num_images)
+    samples = _sample(num_images)
+    return _to_pil_grid(samples)
+
+
+with gr.Blocks(title="CIFAR DDPM Generator") as demo:
+    gr.Markdown("## CIFAR-10 Diffusion Model\nGenerates 32×32 images via 1000-step DDPM reverse diffusion.")
+    with gr.Row():
+        num_slider = gr.Slider(minimum=1, maximum=4, step=1, value=4, label="Number of images")
+    btn = gr.Button("Generate", variant="primary")
+    output = gr.Image(label="Generated images", type="pil")
+    btn.click(fn=_gradio_generate, inputs=[num_slider], outputs=[output])
+
+
+app = gr.mount_gradio_app(app, demo, path="/")

@@ -160,7 +160,7 @@ def _gradio_generate(num_images: int) -> Image.Image:
     return _to_pil_grid(_sample(int(num_images)))
 
 
-with gr.Blocks(title="CIFAR-10 Diffusion Model", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="CIFAR-10 Diffusion Model") as demo:
     gr.Markdown(
         "# CIFAR-10 Diffusion Model\n"
         "Generates images via DDIM sampling (50 steps). "
@@ -168,7 +168,7 @@ with gr.Blocks(title="CIFAR-10 Diffusion Model", theme=gr.themes.Soft()) as demo
     )
     num_slider = gr.Slider(minimum=1, maximum=4, step=1, value=4, label="Number of images")
     btn = gr.Button("Generate", variant="primary", size="lg")
-    output = gr.Image(label="Generated images", type="pil", show_download_button=True)
+    output = gr.Image(label="Generated images", type="pil")
     btn.click(fn=_gradio_generate, inputs=[num_slider], outputs=[output])
 
 

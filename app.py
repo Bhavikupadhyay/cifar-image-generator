@@ -16,6 +16,7 @@ Endpoints:
 """
 
 import io
+import math
 import os
 import yaml
 import numpy as np
@@ -115,7 +116,7 @@ def _sample(num_images: int) -> np.ndarray:
 
 # ── Image utilities ───────────────────────────────────────────────────────────
 
-UPSCALE = 8  # 32px → 256px per image
+UPSCALE = 4  # 32px → 128px per image
 
 def _to_pil_grid(images: np.ndarray, nrow: int = 4) -> Image.Image:
     """Convert (N, C, H, W) float32 in [-1,1] to an upscaled PIL grid."""
@@ -149,15 +150,17 @@ def health():
 
 @app.post("/generate")
 def generate(num_images: int = 1):
-    if not 1 <= num_images <= 4:
-        raise HTTPException(status_code=400, detail="num_images must be between 1 and 4")
+    if not 1 <= num_images <= 64:
+        raise HTTPException(status_code=400, detail="num_images must be between 1 and 64")
     return StreamingResponse(_to_png_bytes(_sample(num_images)), media_type="image/png")
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 
 def _gradio_generate(num_images: int) -> Image.Image:
-    return _to_pil_grid(_sample(int(num_images)))
+    num_images = int(num_images)
+    nrow = math.ceil(math.sqrt(num_images))
+    return _to_pil_grid(_sample(num_images), nrow=nrow)
 
 
 with gr.Blocks(title="CIFAR-10 Diffusion Model") as demo:
@@ -166,7 +169,7 @@ with gr.Blocks(title="CIFAR-10 Diffusion Model") as demo:
         "Generates images via DDIM sampling (50 steps). "
         "Each run produces fresh random samples."
     )
-    num_slider = gr.Slider(minimum=1, maximum=4, step=1, value=4, label="Number of images")
+    num_slider = gr.Slider(minimum=1, maximum=64, step=1, value=16, label="Number of images")
     btn = gr.Button("Generate", variant="primary", size="lg")
     output = gr.Image(label="Generated images", type="pil")
     btn.click(fn=_gradio_generate, inputs=[num_slider], outputs=[output])

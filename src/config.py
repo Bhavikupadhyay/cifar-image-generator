@@ -12,10 +12,22 @@ class Config:
 
   # --- Training Hyperparameters ---
   batch_size: int = 256
-  num_workers: int = 2
+  num_workers: int = 4
   num_epochs: int = 100
   learning_rate: float = 2e-4
   seed: int = 42
+
+  # --- Speed / precision ---
+  use_amp: bool = True
+  use_compile: bool = False
+
+  # --- EMA ---
+  use_ema: bool = True
+  ema_decay: float = 0.9999
+
+  # --- Intermediate FID (0 = disabled) ---
+  fid_every_epochs: int = 0
+  fid_num_samples: int = 128
 
   # --- Checkpointing and Logging ---
   save_every_epochs: int = 5

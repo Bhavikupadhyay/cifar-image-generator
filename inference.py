@@ -95,7 +95,12 @@ def main():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
     checkpoint = torch.load(ckpt_path, map_location=args.device)
-    ddpm.load_state_dict(checkpoint)
+    # Support both old flat format and new {model_state_dict, ema_state_dict} format
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        state = checkpoint.get('ema_state_dict') or checkpoint['model_state_dict']
+    else:
+        state = checkpoint
+    ddpm.load_state_dict(state)
     ddpm.eval()
     
     # 4. Inference

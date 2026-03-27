@@ -76,12 +76,13 @@ app = FastAPI(title="CIFAR DDPM Generator", lifespan=lifespan)
 
 # ── DDIM sampling ─────────────────────────────────────────────────────────────
 
-def _sample(num_images: int) -> np.ndarray:
+def _sample(num_images: int, num_steps: int = None) -> np.ndarray:
     """DDIM reverse diffusion (eta=0, deterministic) in num_steps steps."""
     sched: _Schedule = _state["schedule"]
     cfg = _state["cfg"]
     session: ort.InferenceSession = _state["session"]
-    num_steps: int = _state["ddim_steps"]
+    if num_steps is None:
+        num_steps = _state["ddim_steps"]
 
     # Evenly spaced timestep indices from T-1 down to 0
     T = sched.n_timesteps
@@ -157,22 +158,31 @@ def generate(num_images: int = 1):
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
 
-def _gradio_generate(num_images: int) -> Image.Image:
+def _gradio_generate(num_images: int, ddim_steps: int) -> Image.Image:
     num_images = int(num_images)
     nrow = math.ceil(math.sqrt(num_images))
-    return _to_pil_grid(_sample(num_images), nrow=nrow)
+    return _to_pil_grid(_sample(num_images, num_steps=int(ddim_steps)), nrow=nrow)
 
 
 with gr.Blocks(title="CIFAR-10 Diffusion Model") as demo:
     gr.Markdown(
         "# CIFAR-10 Diffusion Model\n"
-        "Generates images via DDIM sampling (50 steps). "
-        "Each run produces fresh random samples."
+        "A UNet trained on CIFAR-10 to predict and remove noise, "
+        "then sampled in reverse to generate new 32×32 images from pure Gaussian noise."
     )
-    num_slider = gr.Slider(minimum=1, maximum=64, step=1, value=16, label="Number of images")
+    gr.Markdown(
+        "**DDIM steps** — controls the speed/quality trade-off. "
+        "DDIM (Denoising Diffusion Implicit Models) lets you run the reverse diffusion process "
+        "in far fewer steps than the model was trained with (1000), by taking larger, "
+        "deterministic jumps through the noise schedule. "
+        "Fewer steps = faster but coarser; more steps = slower but sharper."
+    )
+    with gr.Row():
+        num_slider = gr.Slider(minimum=1, maximum=64, step=1, value=16, label="Number of images")
+        ddim_slider = gr.Slider(minimum=10, maximum=200, step=10, value=50, label="DDIM steps")
     btn = gr.Button("Generate", variant="primary", size="lg")
     output = gr.Image(label="Generated images", type="pil")
-    btn.click(fn=_gradio_generate, inputs=[num_slider], outputs=[output])
+    btn.click(fn=_gradio_generate, inputs=[num_slider, ddim_slider], outputs=[output])
 
 
 app = gr.mount_gradio_app(app, demo, path="/")

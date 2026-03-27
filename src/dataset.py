@@ -15,12 +15,15 @@ def get_cifar_dataloaders(cfg):
   train_set = CIFAR10(root=full_data_path, train=True, download=True, transform=transform)
   test_set = CIFAR10(root=full_data_path, train=False, download=True, transform=transform)
   
+  persistent = cfg.num_workers > 0
+
   train_loader = DataLoader(
     train_set,
     batch_size=cfg.batch_size,
     shuffle=True,
     num_workers=cfg.num_workers,
-    pin_memory=True
+    pin_memory=True,
+    persistent_workers=persistent,
   )
 
   test_loader = DataLoader(
@@ -28,7 +31,8 @@ def get_cifar_dataloaders(cfg):
     batch_size=cfg.batch_size,
     shuffle=False,
     num_workers=cfg.num_workers,
-    pin_memory=True
+    pin_memory=True,
+    persistent_workers=persistent,
   )
 
   return train_loader, test_loader

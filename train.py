@@ -28,23 +28,32 @@ def _use_wandb(cfg):
 
 
 def _get_grad_norm(model):
-    total_norm = 0.0
-    for p in model.parameters():
-        if p.grad is not None:
-            total_norm += p.grad.data.norm(2).item() ** 2
-    return total_norm ** 0.5
+    # Accumulate squared norms on GPU; only one .item() sync at the end
+    total_sq = sum(
+        p.grad.data.norm(2) ** 2
+        for p in model.parameters()
+        if p.grad is not None
+    )
+    return total_sq.sqrt().item()
 
 
 class EMA:
-    """Exponential Moving Average of model weights."""
+    """Exponential Moving Average of model weights.
+
+    Tracks only trainable parameters (not non-learnable buffers like betas/alphas).
+    Uses lerp_ so there are zero new allocations and one fused CUDA kernel per param.
+    """
     def __init__(self, model, decay=0.9999):
         self.decay = decay
-        self.shadow = copy.deepcopy(model.state_dict())
+        self.shadow = {
+            name: param.data.clone()
+            for name, param in model.named_parameters()
+        }
 
     @torch.no_grad()
     def update(self, model):
-        for k, v in model.state_dict().items():
-            self.shadow[k] = self.decay * self.shadow[k] + (1.0 - self.decay) * v
+        for name, param in model.named_parameters():
+            self.shadow[name].lerp_(param.data, 1.0 - self.decay)
 
     def state_dict(self):
         return self.shadow

@@ -22,7 +22,7 @@ class TimeEmbeddings(nn.Module):
 
 
 class UNet(nn.Module):
-  def __init__(self, n_channels=3, n_classes=3, time_emb_dim=256, base_channels=64):
+  def __init__(self, n_channels=3, n_classes=3, time_emb_dim=256, base_channels=64, use_group_norm=True):
     super().__init__()
 
     self.time_mlp = nn.Sequential(
@@ -31,22 +31,22 @@ class UNet(nn.Module):
         nn.Linear(time_emb_dim, time_emb_dim)
     )
 
-    # Rename for ease of use
     c = base_channels
+    gn = use_group_norm
 
     # Encoders
-    self.inc = DoubleConv(n_channels, c)
-    self.down1 = Downsample(c, c * 2)
-    self.down2 = Downsample(c * 2, c * 4)
-    self.down3 = Downsample(c * 4, c * 8)
+    self.inc = DoubleConv(n_channels, c, use_group_norm=gn)
+    self.down1 = Downsample(c, c * 2, use_group_norm=gn)
+    self.down2 = Downsample(c * 2, c * 4, use_group_norm=gn)
+    self.down3 = Downsample(c * 4, c * 8, use_group_norm=gn)
 
     # Bottleneck
-    self.bot = DoubleConv(c * 8, c * 16)
+    self.bot = DoubleConv(c * 8, c * 16, use_group_norm=gn)
 
     # Decoders
-    self.up1 = Upsample((c * 16) + (c * 4), (c * 4))
-    self.up2 = Upsample((c * 4) + (c * 2), (c * 2))
-    self.up3 = Upsample(c * 2 + c, c)
+    self.up1 = Upsample((c * 16) + (c * 4), (c * 4), use_group_norm=gn)
+    self.up2 = Upsample((c * 4) + (c * 2), (c * 2), use_group_norm=gn)
+    self.up3 = Upsample(c * 2 + c, c, use_group_norm=gn)
 
     # Output
     self.outc = nn.Conv2d(c, n_classes, kernel_size=1)

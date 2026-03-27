@@ -3,7 +3,7 @@ import os
 from tqdm import tqdm
 from torchmetrics.image.fid import FrechetInceptionDistance
 
-from src import Config, get_cifar_dataloaders, load_run_config, inverse_transform
+from src import Config, get_cifar_dataloaders, load_run_config, load_checkpoint, inverse_transform
 from src.modules import UNet, DDPM
 
 
@@ -48,11 +48,21 @@ def calculate_fid(run_name, num_samples=1000, batch_size=64, device=None):
     cfg.root_dir = os.getcwd()
     cfg.resume_run_folder(run_name)
 
+    ckpts = [f for f in os.listdir(cfg.ckpt_dir) if f.endswith('.pth') and 'quantized' not in f]
+    def get_epoch(f):
+        try: return int(f.split('_')[-1].split('.')[0])
+        except: return 0
+    ckpt_path = os.path.join(cfg.ckpt_dir, sorted(ckpts, key=get_epoch)[-1])
+
+    print(f"Loading checkpoint: {ckpt_path}")
+    state, use_gn = load_checkpoint(ckpt_path, device=device)
+
     unet = UNet(
         n_channels=cfg.input_channels,
         n_classes=cfg.input_channels,
         time_emb_dim=cfg.embedding_dim,
         base_channels=cfg.base_channels,
+        use_group_norm=use_gn,
     ).to(device)
 
     ddpm = DDPM(
@@ -62,22 +72,6 @@ def calculate_fid(run_name, num_samples=1000, batch_size=64, device=None):
         beta_end=cfg.beta_end,
         embedding_dim=cfg.embedding_dim,
     ).to(device)
-
-    ckpts = [f for f in os.listdir(cfg.ckpt_dir) if f.endswith('.pth')]
-    def get_epoch(f):
-        try: return int(f.split('_')[-1].split('.')[0])
-        except: return 0
-    latest_ckpt = sorted(ckpts, key=get_epoch)[-1]
-    ckpt_path = os.path.join(cfg.ckpt_dir, latest_ckpt)
-
-    print(f"Loading checkpoint: {ckpt_path}")
-    checkpoint = torch.load(ckpt_path, map_location=device)
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        state = checkpoint.get('ema_state_dict') or checkpoint['model_state_dict']
-    else:
-        state = checkpoint
-    ddpm.load_state_dict(state)
-    ddpm.eval()
 
     print(f"Collecting {num_samples} real images...")
     print(f"Generating {num_samples} fake images...")

@@ -55,12 +55,30 @@ def main():
     print(f"Loaded config from: {cfg.run_dir}")
     print(f"Device: {args.device}")
     
-    # 2. Init Models
+    # 2. Resolve checkpoint path
+    if args.epoch == 'latest':
+        ckpts = [f for f in os.listdir(cfg.ckpt_dir) if f.endswith('.pth') and 'quantized' not in f]
+        if not ckpts:
+            raise FileNotFoundError(f"No checkpoints found in {cfg.ckpt_dir}")
+        def get_epoch(fname):
+            try: return int(fname.split('_')[-1].split('.')[0])
+            except: return 0
+        ckpt_path = os.path.join(cfg.ckpt_dir, sorted(ckpts, key=get_epoch)[-1])
+    else:
+        ckpt_path = os.path.join(cfg.ckpt_dir, f'ckpt_epoch_{args.epoch}.pth')
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+    print(f"Loading checkpoint: {os.path.basename(ckpt_path)}")
+
+    # 3. Detect norm type from checkpoint, then build model
+    state, use_gn = load_checkpoint(ckpt_path, device=args.device)
+
     unet = UNet(
         n_channels=cfg.input_channels,
         n_classes=cfg.input_channels,
         time_emb_dim=cfg.embedding_dim,
-        base_channels=cfg.base_channels
+        base_channels=cfg.base_channels,
+        use_group_norm=use_gn,
     ).to(args.device)
 
     ddpm = DDPM(
@@ -68,38 +86,9 @@ def main():
         n_timesteps=cfg.num_timesteps,
         beta_start=cfg.beta_start,
         beta_end=cfg.beta_end,
-        embedding_dim=cfg.embedding_dim
+        embedding_dim=cfg.embedding_dim,
     ).to(args.device)
-    
-    # 3. Load Checkpoint
-    if args.epoch == 'latest':
-        # Find latest checkpoint
-        ckpts = [f for f in os.listdir(cfg.ckpt_dir) if f.endswith('.pth')]
-        if not ckpts:
-            raise FileNotFoundError(f"No checkpoints found in {cfg.ckpt_dir}")
-        # Sort by epoch number (assuming format vkpt_epoch_N.pth)
-        # We can try to parse N
-        def get_epoch(fname):
-            try:
-                return int(fname.split('_')[-1].split('.')[0])
-            except:
-                return 0
-        latest_ckpt = sorted(ckpts, key=get_epoch)[-1]
-        ckpt_path = os.path.join(cfg.ckpt_dir, latest_ckpt)
-        print(f"Loading latest checkpoint: {latest_ckpt}")
-    else:
-        ckpt_path = os.path.join(cfg.ckpt_dir, f'ckpt_epoch_{args.epoch}.pth')
-        print(f"Loading checkpoint: {ckpt_path}")
 
-    if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
-
-    checkpoint = torch.load(ckpt_path, map_location=args.device)
-    # Support both old flat format and new {model_state_dict, ema_state_dict} format
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        state = checkpoint.get('ema_state_dict') or checkpoint['model_state_dict']
-    else:
-        state = checkpoint
     ddpm.load_state_dict(state)
     ddpm.eval()
     

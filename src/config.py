@@ -20,6 +20,7 @@ class Config:
   # --- Speed / precision ---
   use_amp: bool = True
   use_compile: bool = False
+  use_group_norm: bool = True   # False = BatchNorm (legacy checkpoints)
 
   # --- EMA ---
   use_ema: bool = True

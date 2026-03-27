@@ -35,6 +35,19 @@ def load_run_config(yaml_path):
   with open(yaml_path, 'r') as f:
     return yaml.safe_load(f)
 
+def detect_norm_type(state_dict):
+  """Return True if checkpoint was trained with GroupNorm, False for BatchNorm."""
+  return any('gn1' in k for k in state_dict.keys())
+
+def load_checkpoint(ckpt_path, device='cpu'):
+  """Load a checkpoint and return (state_dict, use_group_norm)."""
+  raw = torch.load(ckpt_path, map_location=device)
+  if isinstance(raw, dict) and 'model_state_dict' in raw:
+    state = raw.get('ema_state_dict') or raw['model_state_dict']
+  else:
+    state = raw
+  return state, detect_norm_type(state)
+
 def inverse_transform(tensors):
   """ Convert tensors from [-1, 1] back to [0, 1] for plotting """
   return (tensors.clamp(-1, 1) + 1.0) / 2.0

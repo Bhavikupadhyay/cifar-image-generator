@@ -224,7 +224,8 @@ def train(cfg: Config, resume_id=None):
         n_channels=cfg.input_channels,
         n_classes=cfg.input_channels,
         time_emb_dim=cfg.embedding_dim,
-        base_channels=cfg.base_channels
+        base_channels=cfg.base_channels,
+        use_group_norm=cfg.use_group_norm,
     ).to(device)
 
     ddpm = DDPM(
